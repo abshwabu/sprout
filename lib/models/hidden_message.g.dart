@@ -21,13 +21,15 @@ class HiddenMessageAdapter extends TypeAdapter<HiddenMessage> {
       seasonNumber: fields[1] as int,
       text: fields[2] as String,
       imagePath: fields[3] as String?,
+      isRevealed: fields[4] as bool,
+      dateUnlocked: fields[5] as DateTime?,
     );
   }
 
   @override
   void write(BinaryWriter writer, HiddenMessage obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(6)
       ..writeByte(0)
       ..write(obj.stageRequired)
       ..writeByte(1)
@@ -35,7 +37,11 @@ class HiddenMessageAdapter extends TypeAdapter<HiddenMessage> {
       ..writeByte(2)
       ..write(obj.text)
       ..writeByte(3)
-      ..write(obj.imagePath);
+      ..write(obj.imagePath)
+      ..writeByte(4)
+      ..write(obj.isRevealed)
+      ..writeByte(5)
+      ..write(obj.dateUnlocked);
   }
 
   @override

@@ -1,11 +1,14 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 import '../providers/plant_provider.dart';
-import '../models/plant_state.dart';
+import '../models/hidden_message.dart';
 import '../services/notification_service.dart';
 import 'settings_screen.dart';
+import 'bloom_reveal_screen.dart';
+import 'history_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -35,9 +38,11 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStateMixin {
   late AnimationController _dropletController;
   late AnimationController _plantController;
+  late AnimationController _swayController;
   late Animation<double> _dropletY;
   late Animation<double> _dropletOpacity;
   late Animation<double> _plantScale;
+  late Animation<double> _swayAnimation;
 
   bool _isAnimating = false;
 
@@ -81,6 +86,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       ),
     ]).animate(_plantController);
 
+    _swayController = AnimationController(
+      duration: const Duration(seconds: 4),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _swayAnimation = Tween<double>(begin: -0.025, end: 0.025).animate(
+      CurvedAnimation(parent: _swayController, curve: Curves.easeInOut),
+    );
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkNotificationPermissionOnLaunch();
     });
@@ -90,6 +104,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
   void dispose() {
     _dropletController.dispose();
     _plantController.dispose();
+    _swayController.dispose();
     super.dispose();
   }
 
@@ -111,13 +126,56 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
     return 1.0;
   }
 
-  void _showResetConfirmation(BuildContext context) {
+  void _showStartNewSeasonDialog(BuildContext context) {
+    final textController = TextEditingController();
+    final plantState = ref.read(plantProvider);
+    if (plantState == null) return;
+    
+    final nextSeason = plantState.seasonNumber + 1;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Start New Season?'),
-        content: const Text(
-          'This will reset your plant to a seed and start a new season. Your lifetime longest streak and log history will remain intact.',
+        title: Text('Start Season $nextSeason'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This will reset your plant to a seed for a new season. Your history and past unlocked messages will remain safe.',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 12),
+              const Text(
+                'Gifter/Developer Prompt (Optional):',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2C3E35)),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Add a custom secret message to be revealed when the plant next reaches Full Bloom (Stage 5):',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: textController,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: 'e.g. You are doing amazing! I love you! 💖',
+                  hintStyle: TextStyle(fontSize: 13),
+                  contentPadding: EdgeInsets.all(12),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Note: Alternatively, you can hardcode default messages in lib/services/message_seed.dart before building.',
+                style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -125,11 +183,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
-              ref.read(plantProvider.notifier).startNewSeason();
-              Navigator.pop(context);
+            onPressed: () async {
+              final secretText = textController.text.trim();
+              if (secretText.isNotEmpty) {
+                final box = Hive.box<HiddenMessage>('hiddenMessageBox');
+                final newMessage = HiddenMessage(
+                  stageRequired: 5,
+                  seasonNumber: nextSeason,
+                  text: secretText,
+                  imagePath: null,
+                  isRevealed: false,
+                );
+                await box.add(newMessage);
+              }
+              
+              if (context.mounted) {
+                ref.read(plantProvider.notifier).startNewSeason();
+                Navigator.pop(context);
+              }
             },
-            child: const Text('Start New Season'),
+            child: const Text('Start Season'),
           ),
         ],
       ),
@@ -192,7 +265,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
       
       final updatedState = ref.read(plantProvider);
       if (updatedState != null && updatedState.stage > oldStage) {
-        _showGrowthMessage(updatedState.stage);
+        final message = ref.read(plantProvider.notifier).getHiddenMessageFor(
+              updatedState.stage,
+              updatedState.seasonNumber,
+            );
+        if (message != null) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) =>
+                    BloomRevealScreen(message: message),
+                transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+                transitionDuration: const Duration(milliseconds: 500),
+              ),
+            );
+          }
+        } else {
+          _showGrowthMessage(updatedState.stage);
+        }
       }
     });
   }
@@ -278,9 +371,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
         ),
         actions: [
           IconButton(
+            tooltip: 'Garden History',
+            icon: const Icon(Icons.calendar_month),
+            onPressed: () {
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondaryAnimation) => const HistoryScreen(),
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+                  transitionDuration: const Duration(milliseconds: 400),
+                ),
+              );
+            },
+          ),
+          IconButton(
             tooltip: 'Start New Season',
             icon: const Icon(Icons.autorenew),
-            onPressed: () => _showResetConfirmation(context),
+            onPressed: () => _showStartNewSeasonDialog(context),
           ),
           IconButton(
             tooltip: 'Settings',
@@ -288,7 +397,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondaryAnimation) => const SettingsScreen(),
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+                  transitionDuration: const Duration(milliseconds: 400),
+                ),
               );
             },
           ),
@@ -351,32 +466,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                       alignment: Alignment.center,
                       clipBehavior: Clip.none,
                       children: [
-                        // Plant Illustration with scale animation
-                        ScaleTransition(
-                          scale: _plantScale,
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 600),
-                            transitionBuilder: (Widget child, Animation<double> animation) {
-                              return ScaleTransition(
-                                scale: animation,
-                                child: FadeTransition(
-                                  opacity: animation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                            child: KeyedSubtree(
-                              key: ValueKey<int>(plantState.stage),
-                              child: SizedBox(
-                                width: 200,
-                                height: 200,
-                                child: CustomPaint(
-                                  painter: PlantPainter(plantState.stage),
+                        // Plant Illustration with scale and sway animation
+                        AnimatedBuilder(
+                          animation: _swayAnimation,
+                          builder: (context, child) {
+                            return Transform.rotate(
+                              angle: _swayAnimation.value,
+                              alignment: Alignment.bottomCenter,
+                              child: child,
+                            );
+                          },
+                          child: ScaleTransition(
+                            scale: _plantScale,
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 600),
+                              transitionBuilder: (Widget child, Animation<double> animation) {
+                                return ScaleTransition(
+                                  scale: animation,
+                                  child: FadeTransition(
+                                    opacity: animation,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: KeyedSubtree(
+                                key: ValueKey<int>(plantState.stage),
+                                child: SizedBox(
+                                  width: 200,
+                                  height: 200,
+                                  child: CustomPaint(
+                                    painter: PlantPainter(
+                                      plantState.stage,
+                                      plantState.seasonNumber,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
+
+                        // Float sparkles at full bloom
+                        if (plantState.stage == 5)
+                          const Positioned.fill(
+                            child: IgnorePointer(
+                              child: FloatingParticles(),
+                            ),
+                          ),
                         
                         // Falling Water Droplet
                         AnimatedBuilder(
@@ -428,6 +564,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Full Bloom / New Season Banner
+                  if (plantState.stage == 5) ...[
+                    Card(
+                      color: const Color(0xFFE8F5E9),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: const BorderSide(color: Color(0xFFA5D6A7), width: 1.5),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          children: [
+                            const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  '🌸 Fully Bloomed! 🌸',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: Color(0xFF2E7D32),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Your plant reached full bloom! Ready to start a fresh season?',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 13, color: Color(0xFF1B5E20)),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: () => _showStartNewSeasonDialog(context),
+                              icon: const Icon(Icons.autorenew),
+                              label: const Text('Start New Season'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -551,7 +734,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
 // Custom Painter to draw beautiful procedural plants representing the 6 growth stages.
 class PlantPainter extends CustomPainter {
   final int stage;
-  PlantPainter(this.stage);
+  final int season;
+  
+  PlantPainter(this.stage, this.season);
+
+  Color _getPrimaryFlowerColor() {
+    switch (season % 5) {
+      case 1:
+        return const Color(0xFFEC407A); // Vibrant Pink
+      case 2:
+        return const Color(0xFFAB47BC); // Purple/Lavender
+      case 3:
+        return const Color(0xFFFF7043); // Coral/Orange
+      case 4:
+        return const Color(0xFF29B6F6); // Soft Blue
+      default:
+        return const Color(0xFFFFCA28); // Golden Yellow
+    }
+  }
+
+  Color _getSecondaryFlowerColor() {
+    switch (season % 5) {
+      case 1:
+        return const Color(0xFFF48FB1); // Pastel Pink
+      case 2:
+        return const Color(0xFFE1BEE7); // Pastel Purple
+      case 3:
+        return const Color(0xFFFFCC80); // Pastel Orange
+      case 4:
+        return const Color(0xFFB3E5FC); // Pastel Blue
+      default:
+        return const Color(0xFFFFE082); // Pastel Yellow
+    }
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -664,7 +879,7 @@ class PlantPainter extends CustomPainter {
       canvas.drawCircle(Offset(centerX - 2, bottomY - 126), 6, paint);
 
       // Flower Bud
-      paint.color = const Color(0xFFEC407A); // Pink bud
+      paint.color = _getPrimaryFlowerColor(); // Dynamic bud color
       canvas.drawOval(
         Rect.fromCenter(center: Offset(centerX - 2, bottomY - 134), width: 14, height: 18),
         paint,
@@ -687,7 +902,7 @@ class PlantPainter extends CustomPainter {
       canvas.drawOval(Rect.fromCenter(center: Offset(centerX + 22, bottomY - 105), width: 26, height: 14), paint);
 
       // Petals (half-open)
-      paint.color = const Color(0xFFF48FB1); // Pastel pink
+      paint.color = _getSecondaryFlowerColor(); // Dynamic pastel petal color
       canvas.drawCircle(Offset(centerX - 10, bottomY - 145), 12, paint);
       canvas.drawCircle(Offset(centerX + 10, bottomY - 145), 12, paint);
       canvas.drawCircle(Offset(centerX, bottomY - 157), 12, paint);
@@ -714,7 +929,7 @@ class PlantPainter extends CustomPainter {
       canvas.drawOval(Rect.fromCenter(center: Offset(centerX - 20, bottomY - 125), width: 26, height: 14), paint);
 
       // Flower petals (Full bloom circular flower)
-      paint.color = const Color(0xFFEC407A); // Vibrant pink
+      paint.color = _getPrimaryFlowerColor(); // Dynamic flower petal color
       final double flowerY = bottomY - 155;
       const double radius = 14;
       canvas.drawCircle(Offset(centerX, flowerY - 16), radius, paint);
@@ -740,6 +955,91 @@ class PlantPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant PlantPainter oldDelegate) {
-    return oldDelegate.stage != stage;
+    return oldDelegate.stage != stage || oldDelegate.season != season;
   }
+}
+
+class FloatingParticles extends StatefulWidget {
+  const FloatingParticles({super.key});
+
+  @override
+  State<FloatingParticles> createState() => _FloatingParticlesState();
+}
+
+class _FloatingParticlesState extends State<FloatingParticles> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late List<_Particle> _particles;
+
+  @override
+  void initState() {
+    super.initState();
+    final random = math.Random();
+    _particles = List.generate(8, (index) => _Particle(random));
+    _controller = AnimationController(
+      duration: const Duration(seconds: 6),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          painter: _ParticlePainter(_particles, _controller.value),
+          size: const Size(200, 200),
+        );
+      },
+    );
+  }
+}
+
+class _Particle {
+  late double xRatio;
+  late double startYRatio;
+  late double speed;
+  late double size;
+  late double opacity;
+
+  _Particle(math.Random random) {
+    xRatio = 0.15 + 0.7 * random.nextDouble();
+    startYRatio = random.nextDouble();
+    speed = 0.4 + 0.6 * random.nextDouble();
+    size = 2.0 + 4.0 * random.nextDouble();
+    opacity = 0.3 + 0.6 * random.nextDouble();
+  }
+}
+
+class _ParticlePainter extends CustomPainter {
+  final List<_Particle> particles;
+  final double progress;
+
+  _ParticlePainter(this.particles, this.progress);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+
+    for (final p in particles) {
+      double y = size.height - ((p.startYRatio + progress * p.speed) % 1.0) * size.height;
+      double x = p.xRatio * size.width;
+
+      // Add a slight horizontal sway based on cosine curve to feel natural
+      x += 12 * math.cos(progress * 2 * math.pi + p.startYRatio * 10);
+
+      // Color is yellow-gold sparkle
+      paint.color = const Color(0xFFFFF59D).withOpacity(p.opacity * (y / size.height)); // Fades out as it goes higher
+      canvas.drawCircle(Offset(x, y), p.size, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

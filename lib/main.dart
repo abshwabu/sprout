@@ -5,8 +5,9 @@ import 'models/plant_state.dart';
 import 'models/daily_log.dart';
 import 'models/hidden_message.dart';
 import 'services/notification_service.dart';
+import 'services/message_seed.dart';
 import 'theme/theme.dart';
-import 'screens/home_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +31,9 @@ void main() async {
 
   // Seed initial PlantState
   _seedInitialPlantState();
+  
+  // Seed initial HiddenMessages
+  _seedHiddenMessages();
 
   // Schedule default reminder on startup if enabled
   if (settingsBox.get('reminders_enabled', defaultValue: true)) {
@@ -43,6 +47,13 @@ void main() async {
       child: MyApp(),
     ),
   );
+}
+
+void _seedHiddenMessages() {
+  final box = Hive.box<HiddenMessage>('hiddenMessageBox');
+  if (box.isEmpty) {
+    box.addAll(MessageSeed.defaultMessages);
+  }
 }
 
 void _seedInitialPlantState() {
@@ -69,7 +80,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Sprout',
       theme: SproutTheme.lightTheme,
-      home: const HomeScreen(),
+      home: const SplashScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

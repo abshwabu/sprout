@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 import '../models/plant_state.dart';
 import '../models/daily_log.dart';
+import '../models/hidden_message.dart';
 
 class PlantNotifier extends Notifier<PlantState?> {
   // Thresholds for stage advancement (feel achievable within about a month)
@@ -151,6 +152,24 @@ class PlantNotifier extends Notifier<PlantState?> {
 
     state = updatedState;
     _plantBox.put('current_plant', updatedState);
+  }
+
+  /// Retrieves a hidden message for the specified stage and season, if not yet revealed.
+  HiddenMessage? getHiddenMessageFor(int stage, int season) {
+    final box = Hive.box<HiddenMessage>('hiddenMessageBox');
+    for (final msg in box.values) {
+      if (msg.stageRequired == stage && msg.seasonNumber == season && !msg.isRevealed) {
+        return msg;
+      }
+    }
+    return null;
+  }
+
+  /// Marks a hidden message as revealed.
+  void markMessageAsRevealed(HiddenMessage message) {
+    message.isRevealed = true;
+    message.dateUnlocked = DateTime.now();
+    message.save();
   }
 }
 

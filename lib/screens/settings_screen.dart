@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:intl/intl.dart';
 import '../services/notification_service.dart';
+import 'memories_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -126,10 +127,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   SwitchListTile(
                     title: const Text(
-                      'Daily Water Reminder',
+                      'Gentle Reminder',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    subtitle: const Text('Get notified daily to water your plant'),
+                    subtitle: const Text('Send a sweet reminder to check on my sprout'),
                     value: _remindersEnabled,
                     onChanged: _toggleReminders,
                     activeColor: Theme.of(context).colorScheme.primary,
@@ -147,6 +148,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                 ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              elevation: 2,
+              child: ListTile(
+                leading: Icon(
+                  Icons.auto_stories,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                title: const Text(
+                  'Garden Memories',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: const Text('Read your collection of unlocked notes'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    PageRouteBuilder(
+                      pageBuilder: (context, animation, secondaryAnimation) => const MemoriesScreen(),
+                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                        return FadeTransition(opacity: animation, child: child);
+                      },
+                      transitionDuration: const Duration(milliseconds: 400),
+                    ),
+                  );
+                },
               ),
             ),
           ],

@@ -1,4 +1,4 @@
-package com.example.sprout
+package com.abshewabu.sprout
 
 import io.flutter.embedding.android.FlutterActivity
 
