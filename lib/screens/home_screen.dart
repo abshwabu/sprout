@@ -325,6 +325,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
           ),
           FilledButton(
             onPressed: () async {
+              final navigator = Navigator.of(context);
               settingsBox.put('permission_asked', true);
               final granted = await NotificationService.requestPermissions();
               settingsBox.put('reminders_enabled', granted);
@@ -333,9 +334,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with TickerProviderStat
                 final minute = settingsBox.get('reminder_minute', defaultValue: 0);
                 await NotificationService.scheduleDailyReminder(hour, minute);
               }
-              if (mounted) {
-                Navigator.pop(context);
-              }
+              navigator.pop();
             },
             child: const Text('Enable Reminders'),
           ),
